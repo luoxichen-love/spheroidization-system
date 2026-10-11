@@ -311,9 +311,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 整页放大到 125%（等同浏览器缩放 125%），只作用于本页面 */
 .home-wrapper {
-  min-height: calc(100vh - 40px);
+  min-height: calc((100vh - 40px) / 1.25);
   padding: 10px 12px;
+  zoom: 1.25;
   background: #f0f4f8;
 }
 
