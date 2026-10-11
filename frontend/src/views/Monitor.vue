@@ -113,14 +113,14 @@ const tableScroll = ref<HTMLElement | null>(null)
 const tableEl = ref<HTMLTableElement | null>(null)
 
 // 表头分隔线可拖拽调整列宽（Excel 式），只作用于本页表格。
-// 前 11 列是固定宽度；最后一列（报警原因）自动吃掉剩余宽度，
+// 前 9 列是固定宽度；最后一列（报警原因）自动吃掉剩余宽度，
 // 它的右边缘始终贴着容器右边，不会因为拖拽其它列而脱开。
 const MIN_COLUMN_WIDTH = 40
 const LAST_COLUMN_MIN = 72
-const LAST_COLUMN_INDEX = 11
+const LAST_COLUMN_INDEX = 9
 
 const columnWidths = ref<number[]>([
-  46, 78, 140, 52, 140, 140, 88, 140, 140, 100, 64, 72,
+  46, 78, 140, 140, 88, 140, 140, 100, 64, 72,
 ])
 
 // 表格容器宽度（换算成表格自身像素，抵消页面 125% 缩放）
@@ -401,66 +401,52 @@ onMounted(() => {
               />
             </th>
             <th>
-              测温时间
+              进线开始时间
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(2, $event)"
               />
             </th>
             <th>
-              温度
+              进线结束时间
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(3, $event)"
               />
             </th>
             <th>
-              进线开始时间
+              进线持续时间
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(4, $event)"
               />
             </th>
             <th>
-              进线结束时间
+              球化开始时间
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(5, $event)"
               />
             </th>
             <th>
-              进线持续时间
+              球化结束时间
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(6, $event)"
               />
             </th>
             <th>
-              球化开始时间
+              球化持续时长
               <span
                 class="col-resizer"
                 @mousedown.prevent="startResize(7, $event)"
               />
             </th>
             <th>
-              球化结束时间
-              <span
-                class="col-resizer"
-                @mousedown.prevent="startResize(8, $event)"
-              />
-            </th>
-            <th>
-              球化持续时长
-              <span
-                class="col-resizer"
-                @mousedown.prevent="startResize(9, $event)"
-              />
-            </th>
-            <th>
               球化结果
               <span
                 class="col-resizer"
-                @mousedown.prevent="startResize(10, $event)"
+                @mousedown.prevent="startResize(8, $event)"
               />
             </th>
             <th>
@@ -476,8 +462,6 @@ onMounted(() => {
           >
             <td>{{ row.id }}</td>
             <td>{{ display(row.spheroidization_weight) }}</td>
-            <td>{{ display(row.spheroidization_temperature_time) }}</td>
-            <td>{{ display(row.spheroidization_temperature) }}</td>
             <td>{{ display(row.spheroidization_wire_entry_start_time) }}</td>
             <td>{{ display(row.spheroidization_wire_entry_end_time) }}</td>
             <td>{{ display(row.spheroidization_wire_entry_total_duration) }}</td>
@@ -505,7 +489,7 @@ onMounted(() => {
           <tr v-if="tableRows.length === 0">
             <td
               class="empty-cell"
-              colspan="12"
+              colspan="10"
             >
               暂无检测记录
             </td>
