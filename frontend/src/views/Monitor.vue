@@ -19,25 +19,142 @@ const records = ref<SpheroidizationRecord[]>([])
 const loading = ref(true)
 const errorMessage = ref("")
 const videoErrors = ref([false, false])
+const popupRecord = ref<SpheroidizationRecord | null>(null)
 
-async function loadRecords() {
-  loading.value = true
-  errorMessage.value = ""
+const knownRecordIds = new Set<number>()
+const popupQueue: SpheroidizationRecord[] = []
+
+let initialRecordsLoaded = false
+let isPolling = false
+let isActive = true
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let popupTimer: ReturnType<typeof setTimeout> | null = null
+
+async function loadRecords(silent = false) {
+  if (!isActive) {
+    return
+  }
+
+  if (silent && isPolling) {
+    return
+  }
+
+  if (silent) {
+    isPolling = true
+  } else {
+    loading.value = true
+    errorMessage.value = ""
+  }
 
   try {
     const result = await querySpheroidization({ page: 1, page_size: 5 })
 
     if (result.code !== 200) {
-      errorMessage.value = result.message || "加载失败"
+      if (!silent) {
+        errorMessage.value = result.message || "加载失败"
+      }
       return
     }
-    records.value = result.data?.items ?? []
+
+    const items = result.data?.items ?? []
+    records.value = items
+
+    if (!initialRecordsLoaded) {
+      items.forEach((record) => knownRecordIds.add(record.id))
+      initialRecordsLoaded = true
+    } else if (silent) {
+      const newRecords = items
+        .filter((record) => !knownRecordIds.has(record.id))
+        .sort((a, b) => a.id - b.id)
+
+      if (newRecords.length > 0) {
+        newRecords.forEach((record) => knownRecordIds.add(record.id))
+        enqueueResultPopups(newRecords)
+      }
+    }
   } finally {
-    loading.value = false
+    if (silent) {
+      isPolling = false
+    } else {
+      loading.value = false
+    }
   }
 
   await nextTick()
   fitColumnsToContainer()
+}
+
+function playResultSound() {
+  try {
+    const context = new AudioContext()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+
+    oscillator.type = "sine"
+    oscillator.frequency.value = 880
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(
+      0.18,
+      context.currentTime + 0.02,
+    )
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      context.currentTime + 0.35,
+    )
+
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.4)
+
+    oscillator.addEventListener("ended", () => {
+      context.close().catch(() => undefined)
+    })
+
+    if (context.state === "suspended") {
+      context.resume().catch(() => undefined)
+    }
+  } catch {
+    return
+  }
+}
+
+function showNextResultPopup() {
+  const nextRecord = popupQueue.shift()
+
+  if (!nextRecord) {
+    popupRecord.value = null
+    return
+  }
+
+  popupRecord.value = nextRecord
+  playResultSound()
+
+  if (popupTimer) {
+    clearTimeout(popupTimer)
+  }
+
+  popupTimer = setTimeout(() => {
+    popupTimer = null
+    showNextResultPopup()
+  }, 10000)
+}
+
+function enqueueResultPopups(newRecords: SpheroidizationRecord[]) {
+  popupQueue.push(...newRecords)
+
+  if (!popupRecord.value) {
+    showNextResultPopup()
+  }
+}
+
+function closeResultPopup() {
+  if (popupTimer) {
+    clearTimeout(popupTimer)
+    popupTimer = null
+  }
+
+  showNextResultPopup()
 }
 
 const tableRows = computed(() => {
@@ -100,13 +217,8 @@ function getAbnormalReason(record: SpheroidizationRecord) {
     : "无"
 }
 
-function openCreateForm() {
-  router.push({
-    path: "/records/spheroidization",
-    query: {
-      create: "1",
-    },
-  })
+function openStandardSettings() {
+  router.push("/records/standard")
 }
 
 const tableScroll = ref<HTMLElement | null>(null)
@@ -273,13 +385,30 @@ function stopResize() {
 }
 
 onUnmounted(() => {
+  isActive = false
   window.removeEventListener("resize", handleWindowResize)
   stopResize()
+
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+
+  if (popupTimer) {
+    clearTimeout(popupTimer)
+    popupTimer = null
+  }
+
+  popupQueue.length = 0
 })
 
 onMounted(() => {
   window.addEventListener("resize", handleWindowResize)
-  loadRecords()
+  loadRecords().catch(() => undefined)
+
+  pollTimer = setInterval(() => {
+    loadRecords(true).catch(() => undefined)
+  }, 3000)
 })
 </script>
 
@@ -346,11 +475,11 @@ onMounted(() => {
     </div>
 
     <button
-      class="btn-bar"
+      class="btn-bar standard-switch"
       type="button"
-      @click="openCreateForm"
+      @click="openStandardSettings"
     >
-      新增一行数据
+      切换标准
     </button>
 
     <div
@@ -543,6 +672,54 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <Transition name="result-popup">
+        <div
+          v-if="popupRecord"
+          class="result-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="result-popup-title"
+        >
+          <div
+            :key="popupRecord.id"
+            class="result-popup"
+            :class="popupRecord.spheroidization_abnormal ? 'is-ng' : 'is-ok'"
+          >
+            <button
+              class="result-popup-close"
+              type="button"
+              aria-label="关闭提示"
+              @click="closeResultPopup"
+            >
+              ×
+            </button>
+
+            <div
+              id="result-popup-title"
+              class="result-popup-caption"
+            >
+              新球化检测记录
+            </div>
+
+            <div class="result-popup-value">
+              {{ popupRecord.spheroidization_abnormal ? "NG" : "OK" }}
+            </div>
+
+            <div class="result-popup-status">
+              {{ popupRecord.spheroidization_abnormal ? "球化异常" : "球化正常" }}
+            </div>
+
+            <div class="result-popup-detail">
+              记录 #{{ popupRecord.id }}
+            </div>
+
+            <div class="result-popup-progress" />
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -648,6 +825,147 @@ onMounted(() => {
 .btn-bar:hover {
   background: #dde8f5;
   border-color: #4a8af4;
+}
+
+.standard-switch {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.standard-switch::before {
+  content: none;
+}
+
+.result-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.result-popup {
+  position: relative;
+  width: min(340px, 100%);
+  overflow: hidden;
+  padding: 28px 32px 30px;
+  text-align: center;
+  background: #fff;
+  border: 3px solid #16803c;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.result-popup.is-ng {
+  border-color: #c62828;
+}
+
+.result-popup-caption {
+  color: #666;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.result-popup-value {
+  margin: 12px 0 6px;
+  color: #16803c;
+  font-size: 82px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 4px;
+}
+
+.result-popup.is-ng .result-popup-value {
+  color: #c62828;
+}
+
+.result-popup-status {
+  color: #16803c;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.result-popup.is-ng .result-popup-status {
+  color: #c62828;
+}
+
+.result-popup-detail {
+  margin-top: 8px;
+  color: #777;
+  font-size: 12px;
+}
+
+.result-popup-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #666;
+  font-size: 26px;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+
+.result-popup-close:hover {
+  color: #1a2a3a;
+  background: #f0f0f0;
+}
+
+.result-popup-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: #16803c;
+  transform-origin: left center;
+  animation: result-countdown 10s linear forwards;
+}
+
+.result-popup.is-ng .result-popup-progress {
+  background: #c62828;
+}
+
+@keyframes result-countdown {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.result-popup-enter-active,
+.result-popup-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.result-popup-enter-active .result-popup,
+.result-popup-leave-active .result-popup {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.result-popup-enter-from,
+.result-popup-leave-to {
+  opacity: 0;
+}
+
+.result-popup-enter-from .result-popup,
+.result-popup-leave-to .result-popup {
+  opacity: 0;
+  transform: scale(0.9);
 }
 
 table {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 
 import {
   applyStandard,
@@ -21,6 +21,38 @@ const createdBy = ref("")
 const remark = ref("")
 const errorMessage = ref("")
 const applyingStandardId = ref<number | null>(null)
+
+interface SwitchRecord {
+  time: string | null
+  operator: string
+  from: StandardRecord
+  to: StandardRecord
+  reason: string | null
+}
+
+const switchRecords = computed<SwitchRecord[]>(() => {
+  const ordered = [...standards.value].sort((a, b) => a.id - b.id)
+
+  return ordered
+    .slice(1)
+    .map((to, index) => ({
+      time: to.created_at,
+      operator: to.created_by,
+      from: ordered[index],
+      to,
+      reason: to.remark,
+    }))
+    .reverse()
+})
+
+function formatStandardSwitch(standard: StandardRecord) {
+  const lower = standard.standard_spheroidization_time_lower
+  const upper = standard.standard_spheroidization_time_upper
+  const range =
+    lower !== null && upper !== null ? `(${lower}–${upper})` : ""
+
+  return `#${standard.id} ${standard.standard_spheroidization_time}s${range}`
+}
 
 async function loadData() {
   loading.value = true
@@ -287,6 +319,61 @@ onMounted(() => {
       </div>
     </section>
 
+    <section class="panel switch-panel">
+      <div class="section-header">
+        <h2>切换记录</h2>
+        <div class="section-actions">
+          <span>共 {{ switchRecords.length }} 条</span>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="loading"
+            @click="loadData"
+          >
+            {{ loading ? "刷新中..." : "刷新" }}
+          </button>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作人</th>
+              <th>从 → 到</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr
+              v-for="record in switchRecords"
+              :key="`${record.from.id}-${record.to.id}`"
+            >
+              <td>{{ record.time || "—" }}</td>
+              <td>{{ record.operator || "—" }}</td>
+              <td class="switch-flow">
+                {{ formatStandardSwitch(record.from) }}
+                →
+                {{ formatStandardSwitch(record.to) }}
+              </td>
+              <td>{{ record.reason || "无" }}</td>
+            </tr>
+
+            <tr v-if="switchRecords.length === 0">
+              <td
+                class="empty-cell"
+                colspan="4"
+              >
+                暂无切换记录
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel create-panel">
       <div class="section-header">
         <h2>新增检测标准</h2>
@@ -394,6 +481,7 @@ onMounted(() => {
 
 .current-panel,
 .history-panel,
+.switch-panel,
 .create-panel {
   margin-bottom: 10px;
   padding: 14px 16px;
@@ -415,6 +503,26 @@ onMounted(() => {
 .section-header span {
   color: #888;
   font-size: 12px;
+}
+
+.switch-panel .section-header {
+  align-items: center;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-actions .secondary-button {
+  min-height: 26px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.switch-flow {
+  white-space: nowrap;
 }
 
 .standard-grid {
